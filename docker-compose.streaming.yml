@@ -1,0 +1,121 @@
+version: "3.8"
+
+networks:
+  coinpulse-net:
+    driver: bridge
+
+services:
+
+  redpanda:
+    image: redpandadata/redpanda:v25.3.9
+    container_name: coinpulse-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --node-id 0
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    networks:
+      - coinpulse-net
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redpanda-init:
+    image: redpandadata/redpanda:v25.3.9
+    container_name: coinpulse-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - coinpulse-net
+    entrypoint: ["/bin/bash", "-c", "rpk topic create crypto-prices --brokers redpanda:9092 --partitions 3 --replicas 1 && echo 'Topic crypto-prices created'"]
+    restart: "no"
+
+  producer:
+    build:
+      context: ./streaming/producer
+      dockerfile: Dockerfile
+    container_name: coinpulse-producer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - KAFKA_BROKER=${KAFKA_BROKER}
+      - BINANCE_WS_URL=${BINANCE_WS_URL}
+    networks:
+      - coinpulse-net
+    restart: on-failure
+
+  flink-jobmanager:
+    build:
+      context: ./streaming/flink
+      dockerfile: Dockerfile
+    container_name: coinpulse-flink-jobmanager
+    hostname: flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        jobmanager.bind-host: 0.0.0.0
+        rest.address: 0.0.0.0
+        rest.port: 8081
+        parallelism.default: 1
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/key.json
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - BQ_DATASET_RAW=${BQ_DATASET_RAW}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - KAFKA_BROKER=${KAFKA_BROKER}
+    volumes:
+      - ./secrets/gcp-key.json:/opt/gcp/key.json:ro
+      - ./streaming/flink/flink_job.py:/opt/flink/usrlib/flink_job.py
+    networks:
+      - coinpulse-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  flink-taskmanager:
+    build:
+      context: ./streaming/flink
+      dockerfile: Dockerfile
+    container_name: coinpulse-flink-taskmanager
+    hostname: flink-taskmanager
+    command: taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        taskmanager.bind-host: 0.0.0.0
+        taskmanager.host: flink-taskmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+      - GOOGLE_APPLICATION_CREDENTIALS=/opt/gcp/key.json
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - BQ_DATASET_RAW=${BQ_DATASET_RAW}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - KAFKA_BROKER=${KAFKA_BROKER}
+    volumes:
+      - ./secrets/gcp-key.json:/opt/gcp/key.json:ro
+      - ./streaming/flink/flink_job.py:/opt/flink/usrlib/flink_job.py
+    networks:
+      - coinpulse-net

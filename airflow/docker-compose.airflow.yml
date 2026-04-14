@@ -1,0 +1,77 @@
+version: "3.8"
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.2
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+    BQ_DATASET_RAW: ${BQ_DATASET_RAW}
+    COINGECKO_API_KEY: ${COINGECKO_API_KEY}
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/gcp/key.json
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - ../secrets/gcp-key.json:/opt/gcp/key.json:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - coinpulse-airflow-net
+
+services:
+
+  postgres:
+    image: postgres:13
+    container_name: coinpulse-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coinpulse-airflow-net
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: coinpulse-airflow-init
+    command: ["bash", "-c", "pip install --no-cache-dir google-cloud-storage google-cloud-bigquery google-auth pyarrow pandas requests && airflow db migrate && airflow users create --username admin --password admin --firstname Ryan --lastname Giggs --role Admin --email derrickryangiggs@gmail.com"]
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: coinpulse-airflow-webserver
+    command: ["bash", "-c", "pip install --no-cache-dir google-cloud-storage google-cloud-bigquery google-auth pyarrow pandas requests && airflow webserver"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: coinpulse-airflow-scheduler
+    command: ["bash", "-c", "pip install --no-cache-dir google-cloud-storage google-cloud-bigquery google-auth pyarrow pandas requests && airflow scheduler"]
+    restart: always
+
+networks:
+  coinpulse-airflow-net:
+    driver: bridge
+
+volumes:
+  airflow-logs:
+  postgres-db:

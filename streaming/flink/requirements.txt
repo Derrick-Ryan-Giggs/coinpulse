@@ -1,0 +1,11 @@
+# Already in pyflink-workshop:latest venv:
+# apache-flink==2.2.0
+# pyarrow
+# pandas
+
+# Added via Dockerfile:
+# google-cloud-bigquery
+# google-cloud-bigquery-storage
+# google-auth
+# grpcio
+# db-dtypes
