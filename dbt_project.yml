@@ -1,0 +1,24 @@
+name: coinpulse
+version: '1.0.0'
+config-version: 2
+
+profile: default
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  coinpulse:
+    staging:
+      +materialized: view
+      +schema: crypto_staging
+    marts:
+      +materialized: incremental
+      +schema: crypto_mart
+      +incremental_strategy: insert_overwrite

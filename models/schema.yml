@@ -1,0 +1,117 @@
+version: 2
+
+models:
+  - name: stg_stream_prices
+    description: "Real-time crypto prices from Binance WebSocket via PyFlink — windowed aggregates"
+    columns:
+      - name: symbol
+        description: "Crypto ticker symbol (uppercased)"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+      - name: price_usd
+        tests: [not_null]
+      - name: avg_price
+        tests: [not_null]
+      - name: min_price
+        tests: [not_null]
+      - name: max_price
+        tests: [not_null]
+      - name: event_timestamp
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
+
+  - name: stg_coingecko_markets
+    description: "Daily market snapshot from CoinGecko REST API"
+    columns:
+      - name: symbol
+        description: "Crypto ticker symbol (uppercased)"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+      - name: price_usd
+        tests: [not_null]
+      - name: market_cap
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]
+      - name: market_cap_category
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['large_cap', 'mid_cap', 'small_cap', 'micro_cap']
+
+  - name: stg_ohlc_candles
+    description: "Daily OHLC candles from CoinGecko REST API"
+    columns:
+      - name: symbol
+        description: "Crypto ticker symbol — old rows use full names (BITCOIN), new rows use tickers (BTC)"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA', 'BITCOIN', 'ETHEREUM', 'SOLANA', 'BINANCECOIN', 'CARDANO']
+      - name: candle_time
+        tests: [not_null]
+      - name: open
+        tests: [not_null]
+      - name: high
+        tests: [not_null]
+      - name: low
+        tests: [not_null]
+      - name: close
+        tests: [not_null]
+      - name: candle_direction
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['bullish', 'bearish']
+      - name: snapshot_date
+        tests: [not_null]
+
+  - name: mart_crypto_prices
+    description: "Streaming prices enriched with latest CoinGecko market metadata"
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+      - name: price_usd
+        tests: [not_null]
+      - name: avg_price
+        tests: [not_null]
+      - name: event_timestamp
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
+
+  - name: mart_volatility
+    description: "Hourly volatility metrics combining streaming and OHLC candle data"
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+      - name: window_hour
+        tests: [not_null]
+      - name: hourly_avg_price
+        tests: [not_null]
+      - name: hourly_low
+        tests: [not_null]
+      - name: hourly_high
+        tests: [not_null]
+      - name: composite_volatility_score
+        tests: [not_null]
+      - name: window_count
+        tests: [not_null]
