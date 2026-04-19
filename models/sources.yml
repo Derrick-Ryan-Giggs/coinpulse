@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: raw_streaming
+    database: coinpulse-2026
+    schema: crypto_raw
+    tables:
+      - name: stream_prices
+        description: "Real-time crypto prices from Binance WebSocket via PyFlink"
+
+  - name: raw_batch
+    database: coinpulse-2026
+    schema: crypto_raw
+    tables:
+      - name: coingecko_ohlcv
+        description: "Daily market data from CoinGecko REST API"
+      - name: coingecko_ohlc_candles
+        description: "Daily OHLC candles from CoinGecko REST API"
