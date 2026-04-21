@@ -5,14 +5,12 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.datastream.connectors.kafka import (
-    KafkaSource,
-    KafkaOffsetsInitializer,
-)
+from pyflink.datastream.connectors.kafka import KafkaSource, KafkaOffsetsInitializer
 from pyflink.common import WatermarkStrategy, Duration
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.datastream.window import TumblingEventTimeWindows, Time
 from pyflink.datastream.functions import WindowFunction, MapFunction
+from pyflink.common.watermark_strategy import TimestampAssigner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,33 +18,43 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── CONFIG FROM ENV ──────────────────────────────────────
+# ── CONFIG ───────────────────────────────────────────────
 KAFKA_BROKER    = os.environ["KAFKA_BROKER"]
 GCP_PROJECT_ID  = os.environ["GCP_PROJECT_ID"]
-BQ_DATASET_RAW  = os.environ["BQ_DATASET_RAW"]
 GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
 GCP_CREDENTIALS = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
 TOPIC           = "crypto-prices"
 
-# ── PARSE FUNCTION ───────────────────────────────────────
+# ── PARSE ────────────────────────────────────────────────
 def parse_message(raw: str):
     try:
         msg = json.loads(raw)
-        return (
-            msg["symbol"],
-            float(msg["price_usd"]),
-            msg["event_timestamp"],
-        )
+        return {
+            "symbol":          msg["symbol"],
+            "price_usd":       float(msg["price_usd"]),
+            "event_timestamp": msg["event_timestamp"],
+        }
     except Exception:
         return None
+
+# ── WATERMARK ASSIGNER ───────────────────────────────────
+# Must be a class implementing TimestampAssigner — not a bare function.
+class CryptoTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, value: dict, record_timestamp: int) -> int:
+        try:
+            return int(
+                datetime.fromisoformat(
+                    value["event_timestamp"].replace("Z", "+00:00")
+                ).timestamp() * 1000
+            )
+        except Exception:
+            return 0
 
 # ── WINDOW AGGREGATION ───────────────────────────────────
 class CryptoWindowFunction(WindowFunction):
     def apply(self, key, window, inputs):
-        # PyFlink 2.2.0 — no collector arg, use yield instead
         inputs = list(inputs)
-        prices = [item[1] for item in inputs]
-
+        prices = [item["price_usd"] for item in inputs]
         if not prices:
             return
 
@@ -60,7 +68,7 @@ class CryptoWindowFunction(WindowFunction):
         stddev = 0.0
         if count > 1:
             variance = sum((p - avg_price) ** 2 for p in prices) / count
-            stddev = variance ** 0.5
+            stddev   = variance ** 0.5
 
         window_start = datetime.fromtimestamp(
             window.start / 1000, tz=timezone.utc
@@ -84,47 +92,51 @@ class CryptoWindowFunction(WindowFunction):
             "event_timestamp": window_end,
         }
 
-# ── GCS SINK VIA MapFunction ─────────────────────────────
+# ── GCS SINK ─────────────────────────────────────────────
 class GCSWriterMap(MapFunction):
     def __init__(self):
-        self._client = None
         self._bucket = None
 
-    def _get_client(self):
-        if self._client is None:
+    def _get_bucket(self):
+        if self._bucket is None:
             from google.cloud import storage
             from google.oauth2 import service_account
-            credentials = service_account.Credentials.from_service_account_file(
+            creds = service_account.Credentials.from_service_account_file(
                 GCP_CREDENTIALS,
-                scopes=["https://www.googleapis.com/auth/devstorage.read_write"]
+                scopes=["https://www.googleapis.com/auth/devstorage.read_write"],
             )
-            self._client = storage.Client(
-                project=GCP_PROJECT_ID,
-                credentials=credentials
-            )
-            self._bucket = self._client.bucket(GCS_BUCKET_NAME)
-            log.info(f"GCS client initialized → gs://{GCS_BUCKET_NAME}/streaming/")
-        return self._client, self._bucket
+            client = storage.Client(project=GCP_PROJECT_ID, credentials=creds)
+            self._bucket = client.bucket(GCS_BUCKET_NAME)
+            log.info(f"GCS client initialised → gs://{GCS_BUCKET_NAME}/streaming/")
+        return self._bucket
 
-    def map(self, value):
+    def map(self, value: dict) -> dict:
         try:
-            client, bucket = self._get_client()
-            now = datetime.now(timezone.utc)
+            bucket = self._get_bucket()
+
+            window_end_dt = datetime.fromisoformat(
+                value["window_end"].replace("Z", "+00:00")
+            )
             path = (
                 f"streaming/"
-                f"{now.strftime('%Y/%m/%d/%H')}/"
-                f"stream_{value['symbol']}_{now.strftime('%Y%m%d_%H%M%S%f')}.jsonl"
+                f"{window_end_dt.strftime('%Y/%m/%d/%H')}/"
+                f"stream_{value['symbol']}_{window_end_dt.strftime('%Y%m%d_%H%M%S')}.jsonl"
             )
-            content = json.dumps(value).encode("utf-8")
-            blob = bucket.blob(path)
-            blob.upload_from_file(BytesIO(content), content_type="application/jsonl")
+
+            content = (json.dumps(value) + "\n").encode("utf-8")
+            bucket.blob(path).upload_from_file(
+                BytesIO(content), content_type="application/jsonl"
+            )
+
             log.info(
-                f"Written {value['symbol']} "
+                f"GCS ✓ {value['symbol']} "
                 f"avg=${value['avg_price']:,.4f} "
-                f"→ gs://{GCS_BUCKET_NAME}/{path}"
+                f"n={value['record_count']} "
+                f"→ {path}"
             )
         except Exception as e:
-            log.error(f"GCS write failed: {e}")
+            log.error(f"GCS write failed for {value.get('symbol')}: {e}")
+
         return value
 
 # ── MAIN ─────────────────────────────────────────────────
@@ -143,25 +155,23 @@ def main():
         .build()
     )
 
+    parsed = (
+        env
+        .from_source(kafka_source, WatermarkStrategy.no_watermarks(), "Redpanda Source")
+        .map(parse_message)
+        .filter(lambda x: x is not None)
+    )
+
     watermark_strategy = (
         WatermarkStrategy
         .for_bounded_out_of_orderness(Duration.of_seconds(10))
-        .with_timestamp_assigner(
-            lambda event, _: (
-                int(datetime.fromisoformat(
-                    event[2].replace("Z", "+00:00")
-                ).timestamp() * 1000)
-                if event else 0
-            )
-        )
+        .with_timestamp_assigner(CryptoTimestampAssigner())  
     )
 
     (
-        env
-        .from_source(kafka_source, watermark_strategy, "Redpanda Source")
-        .map(parse_message)
-        .filter(lambda x: x is not None)
-        .key_by(lambda x: x[0])
+        parsed
+        .assign_timestamps_and_watermarks(watermark_strategy)
+        .key_by(lambda x: x["symbol"])
         .window(TumblingEventTimeWindows.of(Time.minutes(1)))
         .apply(CryptoWindowFunction())
         .map(GCSWriterMap())

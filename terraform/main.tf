@@ -72,6 +72,12 @@ resource "google_project_iam_member" "bq_job_user" {
   member  = "serviceAccount:${google_service_account.coinpulse_sa.email}"
 }
 
+resource "google_project_iam_member" "bq_storage_user" {
+  project = google_project.coinpulse.project_id
+  role    = "roles/bigquery.readSessionUser"
+  member  = "serviceAccount:${google_service_account.coinpulse_sa.email}"
+}
+
 resource "google_project_iam_member" "storage_admin" {
   project = google_project.coinpulse.project_id
   role    = "roles/storage.objectAdmin"
@@ -158,7 +164,8 @@ resource "google_bigquery_table" "stream_prices" {
 }
 
 # ──────────────────────────────────────────────
-# BIGQUERY TABLE — BATCH OHLCV (daily partitioned)
+# BIGQUERY TABLE — BATCH OHLCV
+# Aligned to DAG schema (STRING types, no partition)
 # ──────────────────────────────────────────────
 resource "google_bigquery_table" "coingecko_ohlcv" {
   dataset_id          = google_bigquery_dataset.raw.dataset_id
@@ -166,28 +173,25 @@ resource "google_bigquery_table" "coingecko_ohlcv" {
   project             = google_project.coinpulse.project_id
   deletion_protection = false
 
-  time_partitioning {
-    type  = "DAY"
-    field = "snapshot_date"
-  }
-
   clustering = ["symbol"]
 
   schema = jsonencode([
-    { name = "symbol",        type = "STRING",    mode = "REQUIRED" },
-    { name = "name",          type = "STRING",    mode = "NULLABLE" },
-    { name = "price_usd",     type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "market_cap",    type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "volume_24h",    type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "price_change",  type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "rank",          type = "INT64",     mode = "NULLABLE" },
-    { name = "fdv",           type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "snapshot_date", type = "DATE",      mode = "REQUIRED" },
-    { name = "ingested_at",   type = "TIMESTAMP", mode = "NULLABLE" }
+    { name = "symbol",        type = "STRING",  mode = "REQUIRED" },
+    { name = "name",          type = "STRING",  mode = "NULLABLE" },
+    { name = "price_usd",     type = "FLOAT",   mode = "NULLABLE" },
+    { name = "market_cap",    type = "FLOAT",   mode = "NULLABLE" },
+    { name = "volume_24h",    type = "FLOAT",   mode = "NULLABLE" },
+    { name = "price_change",  type = "FLOAT",   mode = "NULLABLE" },
+    { name = "rank",          type = "INTEGER", mode = "NULLABLE" },
+    { name = "fdv",           type = "FLOAT",   mode = "NULLABLE" },
+    { name = "snapshot_date", type = "STRING",  mode = "REQUIRED" },
+    { name = "ingested_at",   type = "STRING",  mode = "NULLABLE" },
   ])
 }
+
 # ──────────────────────────────────────────────
 # BIGQUERY TABLE — OHLC CANDLES
+# Aligned to DAG schema (STRING types for time fields)
 # ──────────────────────────────────────────────
 resource "google_bigquery_table" "ohlc_candles" {
   dataset_id          = google_bigquery_dataset.raw.dataset_id
@@ -198,13 +202,13 @@ resource "google_bigquery_table" "ohlc_candles" {
   clustering = ["symbol"]
 
   schema = jsonencode([
-    { name = "symbol",        type = "STRING",    mode = "REQUIRED" },
-    { name = "candle_time",   type = "TIMESTAMP", mode = "REQUIRED" },
-    { name = "open",          type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "high",          type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "low",           type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "close",         type = "FLOAT64",   mode = "NULLABLE" },
-    { name = "snapshot_date", type = "STRING",    mode = "NULLABLE" },
-    { name = "ingested_at",   type = "TIMESTAMP", mode = "NULLABLE" }
+    { name = "symbol",        type = "STRING", mode = "REQUIRED" },
+    { name = "candle_time",   type = "STRING", mode = "REQUIRED" },
+    { name = "open",          type = "FLOAT",  mode = "NULLABLE" },
+    { name = "high",          type = "FLOAT",  mode = "NULLABLE" },
+    { name = "low",           type = "FLOAT",  mode = "NULLABLE" },
+    { name = "close",         type = "FLOAT",  mode = "NULLABLE" },
+    { name = "snapshot_date", type = "STRING", mode = "NULLABLE" },
+    { name = "ingested_at",   type = "STRING", mode = "NULLABLE" },
   ])
 }
