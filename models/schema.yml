@@ -5,41 +5,110 @@ models:
     description: "Real-time crypto prices from Binance WebSocket via PyFlink — windowed aggregates"
     columns:
       - name: symbol
-        description: "Crypto ticker symbol (uppercased)"
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+                values: ['BITCOIN', 'ETHEREUM', 'SOLANA', 'BINANCECOIN', 'CARDANO']
+
       - name: price_usd
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: avg_price
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: min_price
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: max_price
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
+      - name: price_stddev
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 50000
+
+      - name: record_count
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 1
+                max_value: 20000
+
       - name: event_timestamp
-        tests: [not_null]
+        tests:
+          - not_null
+
       - name: event_date
-        tests: [not_null]
+        tests:
+          - not_null
 
   - name: stg_coingecko_markets
     description: "Daily market snapshot from CoinGecko REST API"
     columns:
       - name: symbol
-        description: "Crypto ticker symbol (uppercased)"
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+
       - name: price_usd
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: market_cap
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 10000000000000
+
+      - name: rank
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 1
+                max_value: 100
+
+      - name: price_change
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: -60
+                max_value: 60
+
       - name: snapshot_date
-        tests: [not_null]
+        tests:
+          - not_null
+
       - name: market_cap_category
         tests:
           - not_null
@@ -51,67 +120,153 @@ models:
     description: "Daily OHLC candles from CoinGecko REST API"
     columns:
       - name: symbol
-        description: "Crypto ticker symbol — old rows use full names (BITCOIN), new rows use tickers (BTC)"
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA', 'BITCOIN', 'ETHEREUM', 'SOLANA', 'BINANCECOIN', 'CARDANO']
+
       - name: candle_time
-        tests: [not_null]
+        tests:
+          - not_null
+
       - name: open
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: high
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: low
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: close
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: candle_direction
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['bullish', 'bearish']
+
       - name: snapshot_date
-        tests: [not_null]
+        tests:
+          - not_null
 
   - name: mart_crypto_prices
     description: "Streaming prices enriched with latest CoinGecko market metadata"
+    tests:
+      - dbt_expectations.expect_table_row_count_to_be_between:
+          arguments:
+            min_value: 1
+            max_value: 10000000
     columns:
       - name: symbol
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+                values: ['BITCOIN', 'ETHEREUM', 'SOLANA', 'BINANCECOIN', 'CARDANO']
+
       - name: price_usd
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: avg_price
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: event_timestamp
-        tests: [not_null]
+        tests:
+          - not_null
+
       - name: event_date
-        tests: [not_null]
+        tests:
+          - not_null
 
   - name: mart_volatility
     description: "Hourly volatility metrics combining streaming and OHLC candle data"
+    tests:
+      - dbt_expectations.expect_table_row_count_to_be_between:
+          arguments:
+            min_value: 1
+            max_value: 10000000
     columns:
       - name: symbol
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['BTC', 'ETH', 'SOL', 'BNB', 'ADA']
+                values: ['BITCOIN', 'ETHEREUM', 'SOLANA', 'BINANCECOIN', 'CARDANO']
+
       - name: window_hour
-        tests: [not_null]
+        tests:
+          - not_null
+
       - name: hourly_avg_price
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: hourly_low
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: hourly_high
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0.001
+                max_value: 10000000
+
       - name: composite_volatility_score
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 200
+
       - name: window_count
-        tests: [not_null]
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 1
+                max_value: 10000
